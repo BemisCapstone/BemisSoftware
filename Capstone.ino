@@ -20,17 +20,21 @@ const int pinD = 6;
 const int pinE = 7;
 const int pinF = 8;
 const int pinG = 9;
+const int D1 = 15;
+const int D2 = 14;
+const int D3 = 16;
+const int D4 = 10;
 const int encoderA = 2;
 const int encoderB = 3;
 const int resetPin = 19;
-const int calibratePin = 18;
+/*const int calibratePin = 18;
 const int signalLossLED = 15;
 const int exceeds9999LED = 14;
 const int reverseLED = 16;
-const int slowingDownLED = 10;
+const int slowingDownLED = 10; */
 
 
-void setupEncoders(){
+/*void setupEncoders(){
   EICRA = (0x0f); // trigger on rising edge
   EIMSK = (1 << INT0); // enable interrupt INT0
 }
@@ -52,7 +56,7 @@ void setupPinChangeInterrupts() {
 
 /* Interupt Service Routines */
 
-ISR(TIMER1_OVF_vect){
+/*ISR(TIMER1_OVF_vect){
   timer1OverflowCounter++;
   // will overflow every 4.46 years if the motor is not moved
 }
@@ -90,7 +94,7 @@ ISR(PCINT0_vect){
     motorRPM = 0;
     setPoint = 0;
 
-    clearLEDs();
+    //clearLEDs();
     digitalWrite(signalLossLED, LOW);
     digitalWrite(exceeds9999LED, LOW);
     digitalWrite(reverseLED, LOW);
@@ -100,7 +104,7 @@ ISR(PCINT0_vect){
   if (digitalRead(calibratePin))
     setPoint = motorRPM;
 }
-
+*/
 
 void setup() {
   // put your setup code here, to run once:
@@ -111,7 +115,11 @@ void setup() {
   pinMode(pinE, OUTPUT);
   pinMode(pinF, OUTPUT);
   pinMode(pinG, OUTPUT);
-  pinMode(signalLossLED, OUTPUT);
+  pinMode(D1, OUTPUT);
+  pinMode(D2, OUTPUT);
+  pinMode(D3, OUTPUT);
+  pinMode(D4, OUTPUT);
+ /* pinMode(signalLossLED, OUTPUT);
   pinMode(exceeds9999LED, OUTPUT);
   pinMode(reverseLED, OUTPUT);
   pinMode(slowingDownLED, OUTPUT);
@@ -121,16 +129,16 @@ void setup() {
   pinMode(resetPin, INPUT);
   pinMode(calibratePin, INPUT);
 
-  setupEncoders();
+ /* setupEncoders();
   setupTimer1();
   setupPinChangeInterrupts();
-  Serial.begin(9600);
+  Serial.begin(9600); */
 }
 
 
 void loop() {
   // check for signal loss
-  if (stopped) 
+ /* if (stopped) 
     digitalWrite(signalLossLED, HIGH);
   else
     digitalWrite(signalLossLED, LOW);
@@ -176,7 +184,7 @@ void loop() {
   int digit4 = (num - (digit1 * 1000) - (digit2 * 100) - (digit3 * 10));
 
   // display the RPM digits
-  clearLEDs();
+/*  clearLEDs();
   delay(500);
   writeNum(digit1);
   delay(500);
@@ -191,9 +199,52 @@ void loop() {
   clearLEDs();
   delay(100);
   writeNum(digit4);
-  delay(400);
+  delay(400); */
+
+  pickDigit(1);
+  writeNum(1);
+  delay(1);
+  clearLEDs();
+  pickDigit(2);
+  writeNum(2);
+  delay(1);
+  clearLEDs();
+  pickDigit(3);
+  writeNum(3);
+  delay(1);
+  clearLEDs();
+  pickDigit(4);
+  writeNum(4);
+  delay(1);
+  /*
+  pickDigit(3);
+  writeNum(3);
+  pickDigit(4);
+  writeNum(4); */
 }
 
+void pickDigit(int n){
+  digitalWrite(D1, HIGH);
+  digitalWrite(D2, HIGH);
+  digitalWrite(D3, HIGH);
+  digitalWrite(D4, HIGH); 
+
+  switch(n)
+  {
+    case 1:
+      digitalWrite(D1, LOW);
+      break;
+    case 2:
+      digitalWrite(D2, LOW);
+      break;
+    case 3:
+       digitalWrite(D3, LOW);
+       break;
+    case 4:
+      digitalWrite(D4, LOW);
+      break;      
+  }
+}
 
 void writeNum(int x){
   switch(x)
