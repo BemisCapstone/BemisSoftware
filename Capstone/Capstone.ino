@@ -27,14 +27,15 @@ const int D4 = 10;
 const int encoderA = 2;
 const int encoderB = 3;
 const int resetPin = 19;
-/*const int calibratePin = 18;
+/*
+const int calibratePin = 18;
 const int signalLossLED = 15;
 const int exceeds9999LED = 14;
 const int reverseLED = 16;
 const int slowingDownLED = 10; */
 
 
-/*void setupEncoders(){
+void setupEncoders(){
   EICRA = (0x0f); // trigger on rising edge
   EIMSK = (1 << INT0); // enable interrupt INT0
 }
@@ -56,7 +57,7 @@ void setupPinChangeInterrupts() {
 
 /* Interupt Service Routines */
 
-/*ISR(TIMER1_OVF_vect){
+ISR(TIMER1_OVF_vect){
   timer1OverflowCounter++;
   // will overflow every 4.46 years if the motor is not moved
 }
@@ -76,7 +77,7 @@ ISR(INT0_vect){
   counterCapture = timer1OverflowCounter;
   timer1OverflowCounter = 0;
   motorRPM = F_CPU * 60 / timer1TotalClocks;
-  
+
   // check for signal loss
   if (timer1TotalClocks < 2) 
     stopped = true;
@@ -95,16 +96,16 @@ ISR(PCINT0_vect){
     setPoint = 0;
 
     //clearLEDs();
-    digitalWrite(signalLossLED, LOW);
+   /* digitalWrite(signalLossLED, LOW);
     digitalWrite(exceeds9999LED, LOW);
     digitalWrite(reverseLED, LOW);
-    digitalWrite(slowingDownLED, LOW);
+    digitalWrite(slowingDownLED, LOW); */
   }
   
-  if (digitalRead(calibratePin))
-    setPoint = motorRPM;
+ /* if (digitalRead(calibratePin))
+    setPoint = motorRPM; */
 }
-*/
+
 
 void setup() {
   // put your setup code here, to run once:
@@ -119,20 +120,20 @@ void setup() {
   pinMode(D2, OUTPUT);
   pinMode(D3, OUTPUT);
   pinMode(D4, OUTPUT);
- /* pinMode(signalLossLED, OUTPUT);
+/*  pinMode(signalLossLED, OUTPUT);
   pinMode(exceeds9999LED, OUTPUT);
   pinMode(reverseLED, OUTPUT);
-  pinMode(slowingDownLED, OUTPUT);
+  pinMode(slowingDownLED, OUTPUT); */
 
   pinMode(encoderA, INPUT);
   pinMode(encoderB, INPUT);
-  pinMode(resetPin, INPUT);
-  pinMode(calibratePin, INPUT);
+/*  pinMode(resetPin, INPUT);
+  pinMode(calibratePin, INPUT); */
 
- /* setupEncoders();
+  setupEncoders();
   setupTimer1();
   setupPinChangeInterrupts();
-  Serial.begin(9600); */
+  Serial.begin(9600); 
 }
 
 
@@ -159,7 +160,7 @@ void loop() {
   if ((setPoint - motorRPM > 10) && (motorRPM != 0) && direction) 
     digitalWrite(slowingDownLED, HIGH);
   else
-    digitalWrite(slowingDownLED, LOW);
+    digitalWrite(slowingDownLED, LOW); */
 
   // Serial print statements for debugging
   Serial.print("RPM: ");
@@ -174,7 +175,7 @@ void loop() {
   Serial.println((uint32_t)timer1TotalClocks);
   Serial.print("Frequency (Hz): ");
   Serial.println(motorRPM / 60.0);
-  delay(500);
+ // delay(500);
 
   // break motorRPM into 4 digits for displaying
   int num = motorRPM;
@@ -201,17 +202,26 @@ void loop() {
   writeNum(digit4);
   delay(400); */
 
+    writeNum(digit1);
   pickDigit(1);
-  writeNum(1);
-  delay(500);
-  clearLEDs();
+
+  delay(1);
+  //clearLEDs();
+    writeNum(digit2);
   pickDigit(2);
-  writeNum(2);
-  /*
+
+  delay(1);
+  //clearLEDs();
+    writeNum(digit3);
   pickDigit(3);
-  writeNum(3);
+
+  delay(1);
+ // clearLEDs();
+   writeNum(digit4);
   pickDigit(4);
-  writeNum(4); */
+
+  delay(1);
+
 }
 
 void pickDigit(int n){
@@ -373,3 +383,4 @@ void clearLEDs()
   digitalWrite(pinF, LOW);
   digitalWrite(pinG, LOW);
 }
+
