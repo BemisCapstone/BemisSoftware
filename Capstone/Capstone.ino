@@ -1,7 +1,50 @@
+//If the motor falls below the setPoint by this percentage, the slowing down LED will turn on
+#define SLOWING_DOWN_THRESHOLD_PERCENT 5
+#define ERROR_LED_BRIGHTNESS_PERCENT 50
+#define SEVEN_SEG_BRIGHTNESS_PERCENT 100
+
 #define ENCODER_A_MASK 0b00000001
 #define ENCODER_B_MASK 0b00000010
 #define CLOCK_DIVIDER 8
 #define dt 0.01
+
+#define SEVEN_SEG_PORT PORTB
+#define ERROR_LED_PORT PORTF
+#define ERROR_LED_BRIGHTNESS_PORT PORTC
+#define SEVEN_SEG_BRIGHTNESS_PORT PORTC
+#define ENCODER_A_PORT PORTD
+#define ENCODER_B_PORT PORTD
+#define CALIBRATION_PORT PORTD
+#define SEVEN_SEG_DIGIT_PORT PORTD
+
+#define ERROR_LED_BRIGHTNESS_PIN 7
+#define SEVEN_SEG_BRIGHTNESS_PIN 6
+#define ENCODER_A_PIN 0
+#define ENCODER_B_PIN 1
+#define CALIBRATION_PIN 2
+#define SEVEN_SEG_D1_PIN 4
+#define SEVEN_SEG_D2_PIN 5
+#define SEVEN_SEG_D3_PIN 6
+#define SEVEN_SEG_D4_PIN 7
+#define ERROR_SIGNAL_LOSS_PIN 0
+#define ERROR_EXCEEDS_9999_PIN 4
+#define ERROR_REVERSE_PIN 5
+#define ERROR_SLOWING_DOWN_PIN 1
+
+/* GPIO Controls
+ * Used for controlling the direction, state and reading of GPIO pins. Uses the PORT register to find the DDR and PIN 
+ * addresses. This can be done because the register pointers are always sequentially ordered (In every AVR I've ever used).
+ * e.g. setPORT(PORTB,4,HIGH);
+ * e.g. setDDR(PORTB,4,INPUT);
+ * e.g. x = getPIN(PORTB,4); 
+ */
+#define setPORT(_port,_bit,_state) (_state > 0 ? (_port |= (1 << _bit)) : (_port &= ~(1 << _bit)))
+#define setDDR(_port,_bit,_direction) (_direction > 0 ? (*(&_port - 1) |= (1 << _bit)) : (*(&_port - 1) &= ~(1 << _bit)))
+#define getPIN(_port,_bit) ((*(&_port - 2) & (1 << _bit)) > 0 ? HIGH : LOW)
+
+const int digit[] = {0b11100111, 0b01000100, 0b10101101, 0b01101101, 0b01001110, 0b01101011, 0b11101011, 0b01000101, 0b11101111, 0b01101111};
+
+
 
 //Encoder variables:
 volatile uint32_t timerMeasurement = 0;
@@ -13,26 +56,10 @@ volatile bool stopped = false;
 volatile float motorRPM = 0;
 volatile float setPoint = 0;
 
-const int pinA = 1;
-const int pinB = 4;
-const int pinC = 5;
-const int pinD = 6;
-const int pinE = 7;
-const int pinF = 8;
-const int pinG = 9;
-const int D1 = 15;
-const int D2 = 14;
-const int D3 = 16;
-const int D4 = 10;
-const int encoderA = 2;
-const int encoderB = 3;
-const int resetPin = 19;
-/*
-const int calibratePin = 18;
-const int signalLossLED = 15;
-const int exceeds9999LED = 14;
-const int reverseLED = 16;
-const int slowingDownLED = 10; */
+//Seven Segment Display Variable:
+uint8_t currentDigit = 0;
+
+unsigned long timestamp = 0;
 
 
 void setupEncoders(){
@@ -49,9 +76,35 @@ void setupTimer1(){
   TCCR1B = (0<<CS12) | (1<<CS11) | (0<<CS10); //sets clock divider to divide by 8
 } 
 
-void setupPinChangeInterrupts() {
-  PCICR  |= 0b00000001;    // turn on port b
-  PCMSK0 |= 0b00110000;    // turn on physical pins 18, 19
+//timer for 7 seg brightness
+void setupTimer3(){
+  TCCR3A = 0; //sets timer3 control register A bits
+  TCCR3B = 0; 
+  TCCR3A |= (1<<COM3A1) | (0<<COM3A0);
+  //waveform generation mode = Fast PWM and the TOP value is stored in ICR3
+  TCCR3A |= (1<<WGM31) | (0<<WGM30);
+  TCCR3B |= (1<< WGM33) | (1<<WGM32);
+  TCNT3 = 0;
+  ICR3 = 5000; //sets PWM frequency to 400 Hz
+  OCR3A = SEVEN_SEG_BRIGHTNESS_PERCENT/100.0*ICR3;
+  
+  TCCR3B |= (0<<CS32) | (1<<CS31) | (0<<CS30); //sets clock divider to divide by 8
+}
+
+//timer for errror LED brightness
+void setupTimer4(){
+  TCCR4A = 0;
+  TCCR4B = 0;
+  TCCR4C = 0;
+  TCCR4D = 0;
+  TCCR4E = 0;
+  TCCR4A |= (1<<COM4A1) | (0<<COM4A0);
+  TCCR4A |= (1<<PWM4A) | (0<<PWM4B);
+  TCNT4  = 0;
+  OCR4C = 156; //set TOP value, sets PWM frequency to 400 Hz
+  OCR4A = ERROR_LED_BRIGHTNESS_PERCENT/100.0*OCR4C;
+
+  TCCR4B |= (1<<CS43) | (0<<CS42) | (0<<CS41) | (1<<CS40); //sets clock divider by 256
 }
 
 
@@ -68,6 +121,10 @@ ISR(INT0_vect){
 
   // read the state of B
   direction = PIND & ENCODER_B_MASK;
+
+  //If this interrupt executed exactly when the timer overflows, the overflow counter won't be incremented as it should 
+  if(timer1TotalClocks < 2)
+    timer1OverflowCounter++;
   
   if (timer1OverflowCounter > 0)
     timer1TotalClocks = CLOCK_DIVIDER * (timerMeasurement + (timer1OverflowCounter * 65536)) + 26; // compensate for code indeterminancy (± 22)
@@ -77,93 +134,68 @@ ISR(INT0_vect){
   counterCapture = timer1OverflowCounter;
   timer1OverflowCounter = 0;
   motorRPM = F_CPU * 60 / timer1TotalClocks;
-
-  // check for signal loss
-  if (timer1TotalClocks < 2) 
-    stopped = true;
-  else
-    stopped = false;
 }
-
-ISR(PCINT0_vect){
-  if (digitalRead(resetPin)) {
-    timerMeasurement = 0;
-    timer1OverflowCounter = 0;
-    counterCapture = 0;
-    timer1TotalClocks = 0; // clock cycles between two rising edges
-    direction = true;
-    motorRPM = 0;
-    setPoint = 0;
-
-    //clearLEDs();
-   /* digitalWrite(signalLossLED, LOW);
-    digitalWrite(exceeds9999LED, LOW);
-    digitalWrite(reverseLED, LOW);
-    digitalWrite(slowingDownLED, LOW); */
-  }
-  
- /* if (digitalRead(calibratePin))
-    setPoint = motorRPM; */
-}
-
 
 void setup() {
-  // put your setup code here, to run once:
-  pinMode(pinA, OUTPUT);
-  pinMode(pinB, OUTPUT);
-  pinMode(pinC, OUTPUT);
-  pinMode(pinD, OUTPUT);
-  pinMode(pinE, OUTPUT);
-  pinMode(pinF, OUTPUT);
-  pinMode(pinG, OUTPUT);
-  pinMode(D1, OUTPUT);
-  pinMode(D2, OUTPUT);
-  pinMode(D3, OUTPUT);
-  pinMode(D4, OUTPUT);
-/*  pinMode(signalLossLED, OUTPUT);
-  pinMode(exceeds9999LED, OUTPUT);
-  pinMode(reverseLED, OUTPUT);
-  pinMode(slowingDownLED, OUTPUT); */
+  
+  *(&SEVEN_SEG_PORT -1) =0xFF;
+  
+  setDDR(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D1_PIN, OUTPUT);
+  setDDR(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D2_PIN, OUTPUT);
+  setDDR(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D3_PIN, OUTPUT);
+  setDDR(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D4_PIN, OUTPUT);
 
-  pinMode(encoderA, INPUT);
-  pinMode(encoderB, INPUT);
-/*  pinMode(resetPin, INPUT);
-  pinMode(calibratePin, INPUT); */
+  setDDR(ERROR_LED_PORT, ERROR_SIGNAL_LOSS_PIN, OUTPUT);
+  setDDR(ERROR_LED_PORT, ERROR_EXCEEDS_9999_PIN, OUTPUT);
+  setDDR(ERROR_LED_PORT, ERROR_REVERSE_PIN, OUTPUT);
+  setDDR(ERROR_LED_PORT, ERROR_SLOWING_DOWN_PIN, OUTPUT); 
+  
+  setDDR(ENCODER_A_PORT, ENCODER_A_PIN, INPUT);
+  setDDR(ENCODER_B_PORT, ENCODER_B_PIN, INPUT);
+  setDDR(CALIBRATION_PORT, CALIBRATION_PIN, INPUT); 
 
+  setDDR(ERROR_LED_BRIGHTNESS_PORT, ERROR_LED_BRIGHTNESS_PIN, OUTPUT);
+  setDDR(SEVEN_SEG_BRIGHTNESS_PORT, SEVEN_SEG_BRIGHTNESS_PIN, OUTPUT); 
+
+
+  setPORT(ERROR_LED_BRIGHTNESS_PORT, ERROR_LED_BRIGHTNESS_PIN, HIGH);
+  setPORT(SEVEN_SEG_BRIGHTNESS_PORT, SEVEN_SEG_BRIGHTNESS_PIN, HIGH); 
+  
   setupEncoders();
   setupTimer1();
-  setupPinChangeInterrupts();
+  setupTimer3();
+  setupTimer4();
   Serial.begin(9600); 
 }
 
 
 void loop() {
-  // check for signal loss
- /* if (stopped) 
-    digitalWrite(signalLossLED, HIGH);
-  else
-    digitalWrite(signalLossLED, LOW);
 
-  // check to see if the RPM exceeds 9999
-  if (motorRPM > 9999) 
-    digitalWrite(exceeds9999LED, HIGH);
-  else
-    digitalWrite(exceeds9999LED, LOW);
+  while(1)
+  {
+  //Clear all error LEDs
+  ERROR_LED_PORT=0;
+  
+  //signal loss defined as motor RPM < 60
+  if(timer1OverflowCounter > 31)
+  {
+    setPORT(ERROR_LED_PORT, ERROR_SIGNAL_LOSS_PIN, HIGH);
+    motorRPM = 0;
+  }
+  if(motorRPM > 9999)
+    setPORT(ERROR_LED_PORT, ERROR_EXCEEDS_9999_PIN, HIGH);
 
-  // check the polarity of the motor
-  if (!direction && (motorRPM != 0)) 
-    digitalWrite(reverseLED, HIGH);
-  else
-    digitalWrite(reverseLED, LOW);
+  if(!direction && motorRPM !=0)
+    setPORT(ERROR_LED_PORT, ERROR_REVERSE_PIN, HIGH);
 
-  // check to see if the motor is slowing down
-  if ((setPoint - motorRPM > 10) && (motorRPM != 0) && direction) 
-    digitalWrite(slowingDownLED, HIGH);
-  else
-    digitalWrite(slowingDownLED, LOW); */
+  if(setPoint - motorRPM*(1+ SLOWING_DOWN_THRESHOLD_PERCENT/100.0) > 0 && motorRPM != 0)
+    setPORT(ERROR_LED_PORT, ERROR_SLOWING_DOWN_PIN, HIGH);
+
+  if(!getPIN(CALIBRATION_PORT, CALIBRATION_PIN))
+    setPoint = motorRPM;
 
   // Serial print statements for debugging
-  Serial.print("RPM: ");
+/*  Serial.print("RPM: ");
   Serial.println(motorRPM);
   Serial.print("Set Point: ");
   Serial.println(setPoint);
@@ -174,213 +206,28 @@ void loop() {
   Serial.print("Clocks: ");
   Serial.println((uint32_t)timer1TotalClocks);
   Serial.print("Frequency (Hz): ");
-  Serial.println(motorRPM / 60.0);
- // delay(500);
+  Serial.println(motorRPM / 60.0); */
 
-  // break motorRPM into 4 digits for displaying
-  int num = motorRPM;
-  int digit1 = num / 1000;
-  int digit2 = (num - (digit1 * 1000)) / 100;
-  int digit3 = (num - (digit1 * 1000) - (digit2 * 100)) / 10;
-  int digit4 = (num - (digit1 * 1000) - (digit2 * 100) - (digit3 * 10));
 
   // display the RPM digits
-/*  clearLEDs();
-  delay(500);
-  writeNum(digit1);
-  delay(500);
-  clearLEDs();
-  delay(100);
-  writeNum(digit2);
-  delay(500);
-  clearLEDs();
-  delay(100);
-  writeNum(digit3);
-  delay(500);
-  clearLEDs();
-  delay(100);
-  writeNum(digit4);
-  delay(400); */
 
-    writeNum(digit1);
-  pickDigit(1);
+  setPORT(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D1_PIN + currentDigit++, LOW);
 
-  delay(1);
-  //clearLEDs();
-    writeNum(digit2);
-  pickDigit(2);
+//If current digit counter points to the 5th nonexistant digit, set it back to zero
+  if(currentDigit > 3)
+    currentDigit = 0;
 
-  delay(1);
-  //clearLEDs();
-    writeNum(digit3);
-  pickDigit(3);
+  //Change the A, B, C, D, E, F, G< DP pints to the next digit
+  SEVEN_SEG_PORT = digit[uint8_t(motorRPM/pow(10,3-currentDigit))%10];
 
-  delay(1);
- // clearLEDs();
-   writeNum(digit4);
-  pickDigit(4);
+  //Turn on current digit
+  setPORT(SEVEN_SEG_DIGIT_PORT, SEVEN_SEG_D1_PIN + currentDigit, HIGH);
 
-  delay(1);
-
-}
-
-void pickDigit(int n){
-  digitalWrite(D1, HIGH);
-  digitalWrite(D2, HIGH);
-  digitalWrite(D3, HIGH);
-  digitalWrite(D4, HIGH); 
-
-  switch(n)
-  {
-    case 1:
-      digitalWrite(D1, LOW);
-      break;
-    case 2:
-      digitalWrite(D2, LOW);
-      break;
-    case 3:
-       digitalWrite(D3, LOW);
-       break;
-    case 4:
-      digitalWrite(D4, LOW);
-      break;      
+//make each loop last 2ms
+  while(millis() - timestamp < 2);
+  timestamp = millis();
   }
 }
 
-void writeNum(int x){
-  switch(x)
-  {
-    default: zero(); break;
-    case 1: one(); break;
-    case 2: two(); break;
-    case 3: three(); break;
-    case 4: four(); break;
-    case 5: five(); break;
-    case 6: six(); break;
-    case 7: seven(); break;
-    case 8: eight(); break;
-    case 9: nine(); break;
-  }
-}
 
-void zero()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, HIGH);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, LOW);
-}
-
-void one()
-{
-  digitalWrite(pinA, LOW);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, LOW);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, LOW);
-  digitalWrite(pinG, LOW);
-}
-
-void two()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, LOW);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, HIGH);
-  digitalWrite(pinF, LOW);
-  digitalWrite(pinG, HIGH);
-}
-
-void three()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, LOW);
-  digitalWrite(pinG, HIGH);
-}
-
-void four()
-{
-  digitalWrite(pinA, LOW);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, LOW);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, HIGH);
-}
-
-void five()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, LOW);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, HIGH);
-}
-
-void six()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, LOW);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, HIGH);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, HIGH);
-}
-
-void seven()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, LOW);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, LOW);
-  digitalWrite(pinG, LOW);
-}
-
-void eight()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, HIGH);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, HIGH);
-}
-
-void nine()
-{
-  digitalWrite(pinA, HIGH);
-  digitalWrite(pinB, HIGH);
-  digitalWrite(pinC, HIGH);
-  digitalWrite(pinD, HIGH);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, HIGH);
-  digitalWrite(pinG, HIGH);
-}
-
-void clearLEDs()
-{
-  digitalWrite(pinA, LOW);
-  digitalWrite(pinB, LOW);
-  digitalWrite(pinC, LOW);
-  digitalWrite(pinD, LOW);
-  digitalWrite(pinE, LOW);
-  digitalWrite(pinF, LOW);
-  digitalWrite(pinG, LOW);
-}
 
