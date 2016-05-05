@@ -51,8 +51,7 @@ volatile uint32_t timerMeasurement = 0;
 volatile uint32_t timer1OverflowCounter = 0;
 volatile uint32_t counterCapture = 0;
 volatile uint64_t timer1TotalClocks = 0; // clock cycles between two rising edges
-volatile bool direction = true;
-volatile bool stopped = false;
+volatile bool direction = true;d
 volatile float motorRPM = 0;
 volatile float setPoint = 0;
 
